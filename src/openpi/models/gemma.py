@@ -50,6 +50,13 @@ class Config:
     num_kv_heads: int
     head_dim: int
     lora_configs: dict[str, lora.LoRAConfig] = dataclasses.field(default_factory=dict)
+    # Remat (gradient checkpointing) policy for the transformer scan.
+    # "nothing_saveable"  : saves no activations — lowest runtime memory but forces XLA to
+    #                       represent O(n²) recomputation in the HLO graph (~14 GiB for 2B).
+    #                       Recommended only for GPUs with ≥24 GB VRAM.
+    # "everything_saveable": saves all activations — saves ~400 MB during forward pass but
+    #                       drastically reduces XLA HLO size (~7 GiB total), enabling 16 GB training.
+    remat_policy: str = "nothing_saveable"
 
 
 Variant = Literal["dummy", "gemma_300m", "gemma_300m_lora", "gemma_2b", "gemma_2b_lora"]
@@ -356,11 +363,19 @@ class Module(nn.Module):
             embed_dim=self.configs[0].width,  # embedder for first expert only
             name="embedder",
         )
+        # Use the remat policy from the first config (all configs share the same policy).
+        _policy_name = self.configs[0].remat_policy
+        if _policy_name == "offload_dot_with_no_batch_dims":
+            remat_policy = jax.checkpoint_policies.offload_dot_with_no_batch_dims(
+                "device", "pinned_host"
+            )
+        else:
+            remat_policy = getattr(jax.checkpoint_policies, _policy_name)
         block_cls = nn.remat(
             Block,
             prevent_cse=False,
             static_argnums=(5,),  # 0=self, 6=deterministic
-            policy=jax.checkpoint_policies.nothing_saveable,
+            policy=remat_policy,
         )
         self.layers = nn.scan(
             block_cls,
