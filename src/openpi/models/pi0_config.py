@@ -25,6 +25,10 @@ class Pi0Config(_model.BaseModelConfig):
     action_dim: int = 32
     action_horizon: int = 50
     max_token_len: int = None  # type: ignore
+    # Gradient checkpointing policy for transformer scan.
+    # "nothing_saveable"   : O(n²) recompute, O(1) activation memory — needs ≥24GB VRAM.
+    # "everything_saveable": O(1) recompute, O(n) activation memory (~400MB) — fits 16GB VRAM.
+    remat_policy: str = "nothing_saveable"
     # Pi05 has two differences from Pi0:
     # - the state input is part of the discrete language tokens rather than a continuous input that is part of the suffix
     # - the action expert uses adaRMSNorm to inject the flow matching timestep
@@ -115,3 +119,55 @@ class Pi0Config(_model.BaseModelConfig):
         if not filters:
             return nnx.Nothing
         return nnx.All(*filters)
+
+
+@dataclasses.dataclass(frozen=True)
+class Pi0TwoCameraConfig(Pi0Config):
+    """Pi0 variant optimized for ≤16GB VRAM (e.g. RTX 4090, RTX 5070 Ti).
+
+    Changes vs Pi0Config:
+    - 2-camera input (base + left wrist) — saves 196 image tokens
+    - remat_policy="everything_saveable" — saves activations during forward pass instead of
+      forcing XLA to represent O(n²) recomputation in HLO (~7 GiB peak vs ~18 GiB)
+    """
+    # offload_to_host_base: saves activations to CPU RAM instead of GPU.
+    # Reduces GPU peak to ~7GiB (fits in 16GB), at the cost of CPU-GPU transfer latency.
+    remat_policy: str = "offload_dot_with_no_batch_dims"
+
+    @override
+    def get_freeze_filter(self) -> nnx.filterlib.Filter:
+        """Extends the base freeze_filter to also freeze SigLIP (.*img.*).
+
+        Pi0Config's freeze_filter only covers the LLM (.*llm.*) non-LoRA weights.
+        SigLIP (the vision encoder, ~400M params) is left trainable by default,
+        which creates a ~3.2GB Adam optimizer state causing OOM on 16GB GPUs.
+        Freezing SigLIP removes it from the Adam state entirely.
+        """
+        base_filter = super().get_freeze_filter()
+        siglip_filter = nnx_utils.PathRegex(".*img.*")
+        if base_filter is nnx.Nothing:
+            return siglip_filter
+        return nnx.Any(base_filter, siglip_filter)
+
+    @override
+    def inputs_spec(self, *, batch_size: int = 1) -> tuple[_model.Observation, _model.Actions]:
+        image_spec = jax.ShapeDtypeStruct([batch_size, *_model.IMAGE_RESOLUTION, 3], jnp.float32)
+        image_mask_spec = jax.ShapeDtypeStruct([batch_size], jnp.bool_)
+
+        with at.disable_typechecking():
+            observation_spec = _model.Observation(
+                images={
+                    "base_0_rgb": image_spec,
+                    "left_wrist_0_rgb": image_spec,
+                },
+                image_masks={
+                    "base_0_rgb": image_mask_spec,
+                    "left_wrist_0_rgb": image_mask_spec,
+                },
+                state=jax.ShapeDtypeStruct([batch_size, self.action_dim], jnp.float32),
+                tokenized_prompt=jax.ShapeDtypeStruct([batch_size, self.max_token_len], jnp.int32),
+                tokenized_prompt_mask=jax.ShapeDtypeStruct([batch_size, self.max_token_len], bool),
+            )
+        action_spec = jax.ShapeDtypeStruct([batch_size, self.action_horizon, self.action_dim], jnp.float32)
+
+        return observation_spec, action_spec
