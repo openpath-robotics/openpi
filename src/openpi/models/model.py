@@ -146,12 +146,16 @@ def preprocess_observation(
     observation: Observation,
     *,
     train: bool = False,
-    image_keys: Sequence[str] = IMAGE_KEYS,
+    image_keys: Sequence[str] | None = None,
     image_resolution: tuple[int, int] = IMAGE_RESOLUTION,
 ) -> Observation:
     """Preprocess the observations by performing image augmentations (if train=True), resizing (if necessary), and
     filling in a default image mask (if necessary).
     """
+    # Use the observation's own image keys when not explicitly specified.
+    # This supports variable numbers of cameras (e.g. 2-camera configs for ≤16GB VRAM).
+    if image_keys is None:
+        image_keys = tuple(observation.images.keys())
 
     if not set(image_keys).issubset(observation.images):
         raise ValueError(f"images dict missing keys: expected {image_keys}, got {list(observation.images)}")
