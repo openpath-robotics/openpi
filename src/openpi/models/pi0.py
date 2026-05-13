@@ -69,6 +69,10 @@ class Pi0(_model.BaseModel):
         self.pi05 = config.pi05
         paligemma_config = _gemma.get_config(config.paligemma_variant)
         action_expert_config = _gemma.get_config(config.action_expert_variant)
+        # Pass remat_policy through to gemma configs (supports 16GB VRAM variants).
+        remat_policy = getattr(config, "remat_policy", "nothing_saveable")
+        paligemma_config.remat_policy = remat_policy
+        action_expert_config.remat_policy = remat_policy
         # TODO: rewrite gemma in NNX. For now, use bridge.
         llm = nnx_bridge.ToNNX(
             _gemma.Module(
