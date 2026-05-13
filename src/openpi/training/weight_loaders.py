@@ -50,8 +50,8 @@ class CheckpointWeightLoader(WeightLoader):
     def load(self, params: at.Params) -> at.Params:
         # We are loading np.ndarray and relying on the training code to properly convert and shard the params.
         loaded_params = _model.restore_params(download.maybe_download(self.params_path), restore_type=np.ndarray)
-        # Add all missing LoRA weights.
-        return _merge_params(loaded_params, params, missing_regex=".*lora.*")
+        # Add all missing LoRA weights, plus any weights with shape mismatches (e.g. different action_dim).
+        return _merge_params(loaded_params, params, missing_regex=".*")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -91,6 +91,9 @@ def _merge_params(loaded_params: at.Params, params: at.Params, *, missing_regex:
     result = {}
     for k, v in flat_loaded.items():
         if k in flat_ref:
+            if v.shape != flat_ref[k].shape:
+                logger.warning(f"Skipping {k}: shape mismatch (checkpoint {v.shape} vs model {flat_ref[k].shape})")
+                continue
             result[k] = v.astype(flat_ref[k].dtype) if v.dtype != flat_ref[k].dtype else v
 
     flat_loaded.clear()
