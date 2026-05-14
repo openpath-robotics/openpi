@@ -567,34 +567,34 @@ class TrainConfig:
 class LeRobotOpenarmDataConfig(DataConfigFactory):
     """OpenArm 데이터셋 (force 없음, 16D state).
 
-    use_right_wrist=False (기본값): 2-camera 모드 (top + left wrist).
+    use_left_wrist=False (기본값): 2-camera 모드 (top + right wrist).
       Pi0TwoCameraConfig 와 함께 사용 — RTX 5070 Ti (16GB) 같은 단일 GPU 에서 학습 가능.
-    use_right_wrist=True: 3-camera 모드 (top + left + right wrist).
+    use_left_wrist=True: 3-camera 모드 (top + right wrist + left wrist).
       Pi0Config 와 함께 사용 — 24GB+ VRAM 권장.
     """
     repo_id: str = "local:/home/kimminju/openarm_pi0_dataset"
     action_dim: int = 16
     use_delta_actions: bool = True
-    use_right_wrist: bool = True  # Set False for 2-camera mode (≤16GB VRAM)
+    use_left_wrist: bool = False  # True = 3-camera mode (adds left wrist, needs 24GB+ VRAM)
     assets: AssetsConfig = dataclasses.field(default_factory=lambda: AssetsConfig(asset_id="openarm_pi0_dataset"))
 
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
         repack_map = {
-            "observation/image":            "image",
-            "observation/left_wrist_image": "left_wrist_image",
-            "observation/state":            "state",
-            "actions":                      "actions",
-            "prompt":                       "prompt",
+            "observation/image":             "image",
+            "observation/right_wrist_image": "right_wrist_image",
+            "observation/state":             "state",
+            "actions":                       "actions",
+            "prompt":                        "prompt",
         }
-        if self.use_right_wrist:
-            repack_map["observation/right_wrist_image"] = "right_wrist_image"
+        if self.use_left_wrist:
+            repack_map["observation/left_wrist_image"] = "left_wrist_image"
         repack = _transforms.Group(inputs=[_transforms.RepackTransform(repack_map)])
         data_tf = _transforms.Group(
             inputs=[openarm_policy.OpenarmInputs(
                 action_dim=self.action_dim,
                 model_type=model_config.model_type,
-                use_right_wrist=self.use_right_wrist,
+                use_left_wrist=self.use_left_wrist,
             )],
             outputs=[openarm_policy.OpenarmOutputs(action_dim=self.action_dim)],
         )
@@ -628,7 +628,11 @@ class LeRobotOpenarmForceDataConfig(DataConfigFactory):
             "prompt":                        "prompt",
         })])
         data_tf = _transforms.Group(
-            inputs=[openarm_policy.OpenarmInputs(action_dim=self.action_dim, model_type=model_config.model_type)],
+            inputs=[openarm_policy.OpenarmInputs(
+                action_dim=self.action_dim,
+                model_type=model_config.model_type,
+                use_left_wrist=True,  # force config uses all 3 cameras
+            )],
             outputs=[openarm_policy.OpenarmOutputs(action_dim=self.action_dim)],
         )
         if self.use_delta_actions:
@@ -1055,17 +1059,6 @@ _CONFIGS = [
 
     # ── OpenArm configs ──────────────────────────────────────────
     TrainConfig(
-        name="pi0_openarm",
-        model=pi0_config.Pi0Config(action_dim=16, action_horizon=50),
-        data=LeRobotOpenarmDataConfig(
-            repo_id="local:/home/kimminju/openarm_pi0_dataset",
-            base_config=DataConfig(prompt_from_task=True),
-        ),
-        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
-        num_train_steps=30_000,
-        batch_size=16,
-    ),
-    TrainConfig(
         name="pi0_openarm_lora",
         model=pi0_config.Pi0Config(
             action_dim=16, action_horizon=50,
@@ -1086,8 +1079,8 @@ _CONFIGS = [
         ema_decay=None,
     ),
     # ── 16GB VRAM variant (e.g. RTX 4090 / RTX 5070 Ti) ──────────
-    # Uses 2-camera mode (top + left wrist only) to fit within ≤16GB.
-    # For 3-camera training use pi0_openarm_lora on a GPU with ≥24GB VRAM.
+    # Uses 2-camera mode (top + right wrist) + CPU offload remat to fit within ≤16GB.
+    # batch_size=4 uses ~12GB. Try 6 or 8 if no OOM. Reduce to 2 if OOM.
     TrainConfig(
         name="pi0_openarm_lora_16gb",
         model=pi0_config.Pi0TwoCameraConfig(
@@ -1098,28 +1091,18 @@ _CONFIGS = [
         data=LeRobotOpenarmDataConfig(
             repo_id="local:/home/kimminju/openarm_pi0_dataset",
             base_config=DataConfig(prompt_from_task=True),
-            use_right_wrist=False,
+            use_left_wrist=False,
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
-        num_train_steps=30_000,
+        num_train_steps=20_000,
         batch_size=1,
+        num_workers=8,
         checkpoint_base_dir="/home/kimminju/openarm_pi0_dataset/checkpoints",
         freeze_filter=pi0_config.Pi0TwoCameraConfig(
             paligemma_variant="gemma_2b_lora",
             action_expert_variant="gemma_300m_lora",
         ).get_freeze_filter(),
         ema_decay=None,
-    ),
-    TrainConfig(
-        name="pi0_openarm_force",
-        model=pi0_config.Pi0Config(action_dim=16, action_horizon=50),
-        data=LeRobotOpenarmForceDataConfig(
-            repo_id="local:/home/kimminju/openarm_pi0_force_dataset",
-            base_config=DataConfig(prompt_from_task=True),
-        ),
-        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
-        num_train_steps=30_000,
-        batch_size=16,
     ),
     TrainConfig(
         name="pi0_openarm_force_lora",

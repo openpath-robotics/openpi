@@ -1,13 +1,10 @@
 """
 OpenArm π₀ Policy — 데이터 입출력 변환
 
-이 파일을 ~/openpi/src/openpi/policies/openarm_policy.py 로 복사해서 사용합니다.
-(scripts/setup_openpi.sh 가 자동으로 복사)
-
 [π₀ 이미지 슬롯]
-  base_0_rgb       : cam_top (overhead)
-  left_wrist_0_rgb : cam_wrist_left
-  right_wrist_0_rgb: cam_wrist_right
+  base_0_rgb        : cam_top (overhead)
+  right_wrist_0_rgb : cam_wrist_right  ← 기본 2-camera 모드
+  left_wrist_0_rgb  : cam_wrist_left   ← use_left_wrist=True 시 추가 (3-camera)
 
 [state 구성 — 16D (no force)]
   R_joint(7)+R_grip(1)+L_joint(7)+L_grip(1)
@@ -62,29 +59,30 @@ class OpenarmInputs(transforms.DataTransformFn):
 
     action_dim: int = 16  # 실제 action 차원 (padding 전)
     model_type: _model.ModelType = _model.ModelType.PI0
-    # False = 2-camera mode (base + left wrist only) for ≤16GB VRAM.
+    # False = 2-camera mode (base + right wrist) for ≤16GB VRAM.
+    # True  = 3-camera mode (base + right wrist + left wrist).
     # Must match Pi0TwoCameraConfig vs Pi0Config in TrainConfig.
-    use_right_wrist: bool = False
+    use_left_wrist: bool = False
 
     def __call__(self, data: dict) -> dict:
-        base_image       = _parse_image(data["observation/image"])
-        left_wrist_image = _parse_image(data["observation/left_wrist_image"])
+        base_image        = _parse_image(data["observation/image"])
+        right_wrist_image = _parse_image(data["observation/right_wrist_image"])
 
         images = {
-            "base_0_rgb":       base_image,
-            "left_wrist_0_rgb": left_wrist_image,
+            "base_0_rgb":        base_image,
+            "right_wrist_0_rgb": right_wrist_image,
         }
         image_mask = {
-            "base_0_rgb":       np.True_,
-            "left_wrist_0_rgb": np.True_,
+            "base_0_rgb":        np.True_,
+            "right_wrist_0_rgb": np.True_,
         }
 
-        if self.use_right_wrist:
-            right_wrist_image = _parse_image(data["observation/right_wrist_image"])
-            images["right_wrist_0_rgb"] = right_wrist_image
-            # pi0-FAST masks right wrist; pi0 uses it
-            image_mask["right_wrist_0_rgb"] = (
-                np.True_ if self.model_type == _model.ModelType.PI0_FAST else np.False_
+        if self.use_left_wrist:
+            left_wrist_image = _parse_image(data["observation/left_wrist_image"])
+            images["left_wrist_0_rgb"] = left_wrist_image
+            # pi0-FAST masks left wrist; pi0 uses it
+            image_mask["left_wrist_0_rgb"] = (
+                np.True_ if self.model_type == _model.ModelType.PI0 else np.False_
             )
 
         inputs = {

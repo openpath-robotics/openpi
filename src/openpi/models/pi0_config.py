@@ -126,9 +126,9 @@ class Pi0TwoCameraConfig(Pi0Config):
     """Pi0 variant optimized for ≤16GB VRAM (e.g. RTX 4090, RTX 5070 Ti).
 
     Changes vs Pi0Config:
-    - 2-camera input (base + left wrist) — saves 196 image tokens
-    - remat_policy="everything_saveable" — saves activations during forward pass instead of
-      forcing XLA to represent O(n²) recomputation in HLO (~7 GiB peak vs ~18 GiB)
+    - 2-camera input (base + right wrist) — saves 196 image tokens
+    - remat_policy="offload_dot_with_no_batch_dims" — offloads activations to CPU RAM
+      (~7 GiB GPU peak vs ~18 GiB), fits comfortably in 16GB VRAM
     """
     # offload_to_host_base: saves activations to CPU RAM instead of GPU.
     # Reduces GPU peak to ~7GiB (fits in 16GB), at the cost of CPU-GPU transfer latency.
@@ -157,12 +157,12 @@ class Pi0TwoCameraConfig(Pi0Config):
         with at.disable_typechecking():
             observation_spec = _model.Observation(
                 images={
-                    "base_0_rgb": image_spec,
-                    "left_wrist_0_rgb": image_spec,
+                    "base_0_rgb":        image_spec,
+                    "right_wrist_0_rgb": image_spec,
                 },
                 image_masks={
-                    "base_0_rgb": image_mask_spec,
-                    "left_wrist_0_rgb": image_mask_spec,
+                    "base_0_rgb":        image_mask_spec,
+                    "right_wrist_0_rgb": image_mask_spec,
                 },
                 state=jax.ShapeDtypeStruct([batch_size, self.action_dim], jnp.float32),
                 tokenized_prompt=jax.ShapeDtypeStruct([batch_size, self.max_token_len], jnp.int32),
