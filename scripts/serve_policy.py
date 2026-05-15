@@ -2,7 +2,9 @@ import dataclasses
 import enum
 import logging
 import socket
+import time
 
+import numpy as np
 import tyro
 
 from openpi.policies import policy as _policy
@@ -96,9 +98,63 @@ def create_policy(args: Args) -> _policy.Policy:
             return create_default_policy(args.env, default_prompt=args.default_prompt)
 
 
+def _warmup_policy(policy: _policy.Policy) -> None:
+    """JAX JIT warmup for both sample_actions and sample_actions_rtc.
+
+    sample_actions (naive) and sample_actions_rtc (RTC) are compiled separately.
+    Without warmup each first call takes 10–15 s, causing d_naive/d_actual
+    to overflow the action horizon and corrupt the RTC soft-mask parameter d.
+
+    Observation format matches openarm_lora (adjust if using a different config):
+      - observation/state:            (16,)       float32
+      - observation/image:            (480, 640, 3) uint8   — top camera
+      - observation/left_wrist_image: (480, 640, 3) uint8
+      - observation/right_wrist_image:(480, 640, 3) uint8   — optional 3-cam config
+      - prompt:                       str
+    """
+    IMG_H, IMG_W = 480, 640
+    dummy_base = {
+        "observation/state":            np.zeros(16, dtype=np.float32),
+        "observation/image":            np.zeros((IMG_H, IMG_W, 3), dtype=np.uint8),
+        "observation/left_wrist_image": np.zeros((IMG_H, IMG_W, 3), dtype=np.uint8),
+        "observation/right_wrist_image":np.zeros((IMG_H, IMG_W, 3), dtype=np.uint8),
+        "prompt": "warmup",
+    }
+
+    # ── Naive warmup (compiles sample_actions) ──────────────────────────────
+    logging.info("[warmup] Compiling sample_actions (naive)...")
+    t0 = time.monotonic()
+    try:
+        policy.infer(dummy_base)
+    except Exception as e:
+        logging.warning("[warmup] naive infer failed (non-fatal): %s", e)
+    logging.info("[warmup] sample_actions done in %.1f s", time.monotonic() - t0)
+
+    # ── RTC warmup (compiles sample_actions_rtc) ────────────────────────────
+    dummy_rtc = dict(dummy_base)
+    dummy_rtc["_rtc_prev_chunk"] = np.zeros((50, 16), dtype=np.float32)
+    dummy_rtc["_rtc_d"]          = np.int32(5)
+    dummy_rtc["_rtc_s"]          = np.int32(10)
+    dummy_rtc["_rtc_beta"]       = np.float32(5.0)
+
+    logging.info("[warmup] Compiling sample_actions_rtc (RTC)...")
+    t0 = time.monotonic()
+    try:
+        policy.infer(dummy_rtc)
+    except Exception as e:
+        logging.warning("[warmup] RTC infer failed (non-fatal): %s", e)
+    logging.info("[warmup] sample_actions_rtc done in %.1f s", time.monotonic() - t0)
+
+    logging.info("[warmup] Both JIT functions compiled — server ready.")
+
+
 def main(args: Args) -> None:
     policy = create_policy(args)
     policy_metadata = policy.metadata
+
+    # Warm up both JAX JIT functions before accepting client connections.
+    # This prevents the first real inference from being 10-15x slower (JIT compile).
+    _warmup_policy(policy)
 
     # Record the policy's behavior.
     if args.record:

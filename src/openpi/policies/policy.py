@@ -59,16 +59,58 @@ class Policy(BasePolicy):
             self._model = self._model.to(pytorch_device)
             self._model.eval()
             self._sample_actions = model.sample_actions
+            self._sample_actions_rtc = None
         else:
             # JAX model setup
             self._sample_actions = nnx_utils.module_jit(model.sample_actions)
+            # RTC-guided inference (only available on pi0, not pi0_fast)
+            if hasattr(model, "sample_actions_rtc"):
+                self._sample_actions_rtc = nnx_utils.module_jit(model.sample_actions_rtc)
+            else:
+                self._sample_actions_rtc = None
             self._rng = rng or jax.random.key(0)
 
     @override
     def infer(self, obs: dict, *, noise: np.ndarray | None = None) -> dict:  # type: ignore[misc]
+        # Extract RTC params before transforms — they are internal control signals, not observations.
+        rtc_params = None
+        if "_rtc_prev_chunk" in obs and not self._is_pytorch_model and self._sample_actions_rtc is not None:
+            obs = dict(obs)  # shallow copy so we don't mutate the caller's dict
+            rtc_params = {
+                "prev_chunk": np.asarray(obs.pop("_rtc_prev_chunk"), dtype=np.float32),  # (H, D)
+                "d": int(obs.pop("_rtc_d")),
+                "s": int(obs.pop("_rtc_s")),
+                "beta": float(obs.pop("_rtc_beta", 5.0)),
+            }
+
         # Make a copy since transformations may modify the inputs in place.
         inputs = jax.tree.map(lambda x: x, obs)
         inputs = self._input_transform(inputs)
+
+        if rtc_params is not None:
+            # ── RTC path ──────────────────────────────────────────────────────────
+            inputs = jax.tree.map(lambda x: jnp.asarray(x)[np.newaxis, ...], inputs)
+            self._rng, sample_rng = jax.random.split(self._rng)
+            observation = _model.Observation.from_dict(inputs)
+            prev_chunk = jnp.asarray(rtc_params["prev_chunk"])[np.newaxis, :]  # (1, H, D)
+            d = jnp.asarray(rtc_params["d"], dtype=jnp.int32)
+            s = jnp.asarray(rtc_params["s"], dtype=jnp.int32)
+            start_time = time.monotonic()
+            actions = self._sample_actions_rtc(
+                sample_rng,
+                observation,
+                prev_action_chunk=prev_chunk,
+                inference_delay=d,
+                execution_horizon=s,
+                max_guidance_weight=rtc_params["beta"],
+            )
+            model_time = time.monotonic() - start_time
+            outputs = {"state": inputs["state"], "actions": actions}
+            outputs = jax.tree.map(lambda x: np.asarray(x[0, ...]), outputs)
+            outputs = self._output_transform(outputs)
+            outputs["policy_timing"] = {"infer_ms": model_time * 1000}
+            return outputs
+
         if not self._is_pytorch_model:
             # Make a batch and convert to jax.Array.
             inputs = jax.tree.map(lambda x: jnp.asarray(x)[np.newaxis, ...], inputs)
