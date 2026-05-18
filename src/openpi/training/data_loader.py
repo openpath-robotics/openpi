@@ -138,17 +138,28 @@ def create_torch_dataset(
         return FakeDataset(model_config, num_samples=1024)
 
     if repo_id.startswith("local:"):
+        import json
         local_path = repo_id[len("local:"):]
-        dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(
-            os.path.basename(local_path), root=local_path
-        )
+        # Read fps directly from local metadata to avoid HuggingFace API calls
+        with open(os.path.join(local_path, "meta", "info.json")) as f:
+            fps = json.load(f)["fps"]
         dataset = lerobot_dataset.LeRobotDataset(
             os.path.basename(local_path),
             root=local_path,
             delta_timestamps={
-                key: [t / dataset_meta.fps for t in range(action_horizon)] for key in data_config.action_sequence_keys
+                key: [t / fps for t in range(action_horizon)] for key in data_config.action_sequence_keys
             },
         )
+        if data_config.prompt_from_task:
+            tasks_path = os.path.join(local_path, "meta", "tasks.jsonl")
+            tasks = {}
+            with open(tasks_path) as f:
+                for line in f:
+                    if line.strip():
+                        item = json.loads(line)
+                        tasks[item["task_index"]] = item["task"]
+            dataset = TransformedDataset(dataset, [_transforms.PromptFromLeRobotTask(tasks)])
+        return dataset
     else:
         dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id)
         dataset = lerobot_dataset.LeRobotDataset(

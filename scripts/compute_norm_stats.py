@@ -100,6 +100,8 @@ def main(config_name: str, max_frames: int | None = None):
         )
 
     keys = ["state", "actions"]
+    if getattr(config.model, "wrench_dim", 0) > 0:
+        keys = [*keys, "wrench"]
     stats = {key: normalize.RunningStats() for key in keys}
 
     for batch in tqdm.tqdm(data_loader, total=num_batches, desc="Computing stats"):

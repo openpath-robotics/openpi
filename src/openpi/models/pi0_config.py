@@ -25,6 +25,8 @@ class Pi0Config(_model.BaseModelConfig):
     action_dim: int = 32
     action_horizon: int = 50
     max_token_len: int = None  # type: ignore
+    # Dimension of external wrench (force/torque) input. 0 = no force conditioning.
+    wrench_dim: int = 0
     # Gradient checkpointing policy for transformer scan.
     # "nothing_saveable"   : O(n²) recompute, O(1) activation memory — needs ≥24GB VRAM.
     # "everything_saveable": O(1) recompute, O(n) activation memory (~400MB) — fits 16GB VRAM.

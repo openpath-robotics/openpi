@@ -611,11 +611,11 @@ class LeRobotOpenarmDataConfig(DataConfigFactory):
 
 @dataclasses.dataclass(frozen=True)
 class LeRobotOpenarmForceDataConfig(DataConfigFactory):
-    """OpenArm 데이터셋 (force 포함, 28D state)."""
+    """OpenArm 데이터셋 (force 포함, 16D state + 12D wrench 별도 토큰)."""
     repo_id: str = "local:/home/kimminju/openarm_pi0_force_dataset"
     action_dim: int = 16
     use_delta_actions: bool = True
-    assets: AssetsConfig = dataclasses.field(default_factory=lambda: AssetsConfig(asset_id="openarm_pi0_force_dataset"))
+    assets: AssetsConfig = dataclasses.field(default_factory=AssetsConfig)
 
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
@@ -624,6 +624,7 @@ class LeRobotOpenarmForceDataConfig(DataConfigFactory):
             "observation/left_wrist_image":  "left_wrist_image",
             "observation/right_wrist_image": "right_wrist_image",
             "observation/state":             "state",
+            "observation/wrench":            "wrench",
             "actions":                       "actions",
             "prompt":                        "prompt",
         })])
@@ -671,11 +672,13 @@ _CONFIGS = [
         name="pi0_openarm_force_lora",
         model=pi0_config.Pi0Config(
             action_dim=16, action_horizon=50,
+            wrench_dim=12,  # 12D wrench (R_fext(6)+L_fext(6)) as separate token
             paligemma_variant="gemma_2b_lora",
             action_expert_variant="gemma_300m_lora",
         ),
         data=LeRobotOpenarmForceDataConfig(
-            repo_id="local:/home/kimminju/openarm_pi0_force_dataset",
+            repo_id="local:/media/kimminju/OPR-SSD/data/0506_wipe_whiteboard_lerobot",
+            assets=AssetsConfig(asset_id="0506_wipe_whiteboard_lerobot"),
             base_config=DataConfig(prompt_from_task=True),
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),

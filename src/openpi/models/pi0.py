@@ -152,6 +152,8 @@ class Pi0(_model.BaseModel):
             self.action_time_mlp_in = nnx.Linear(2 * action_expert_config.width, action_expert_config.width, rngs=rngs)
             self.action_time_mlp_out = nnx.Linear(action_expert_config.width, action_expert_config.width, rngs=rngs)
         self.action_out_proj = nnx.Linear(action_expert_config.width, config.action_dim, rngs=rngs)
+        if config.wrench_dim > 0:
+            self.wrench_proj = nnx.Linear(config.wrench_dim, action_expert_config.width, rngs=rngs)
 
         # This attribute gets automatically set by model.train() and model.eval().
         self.deterministic = True
@@ -209,6 +211,13 @@ class Pi0(_model.BaseModel):
             input_mask.append(jnp.ones((obs.state.shape[0], 1), dtype=jnp.bool_))
             # image/language inputs do not attend to state or actions
             ar_mask += [True]
+
+            # add wrench token (same causal group as state: ar_mask=False)
+            if obs.wrench is not None:
+                wrench_token = self.wrench_proj(obs.wrench)[:, None, :]
+                tokens.append(wrench_token)
+                input_mask.append(jnp.ones((obs.wrench.shape[0], 1), dtype=jnp.bool_))
+                ar_mask += [False]
 
         action_tokens = self.action_in_proj(noisy_actions)
         # embed timestep using sine-cosine positional encoding with sensitivity in the range [0, 1]

@@ -91,6 +91,9 @@ class OpenarmInputs(transforms.DataTransformFn):
             "image_mask": image_mask,
         }
 
+        if "observation/wrench" in data:
+            inputs["wrench"] = data["observation/wrench"]
+
         if "actions" in data:
             inputs["actions"] = data["actions"]
 
