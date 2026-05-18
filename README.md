@@ -321,3 +321,77 @@ We will collect common issues and their solutions here. If you encounter an issu
 | Import errors when running examples       | Make sure you've installed all dependencies with `uv sync`. Some examples may have additional requirements listed in their READMEs.                    |
 | Action dimensions mismatch                | Verify your data processing transforms match the expected input/output dimensions of your robot. Check the action space definitions in your policy classes.                                  |
 | Diverging training loss                            | Check the `q01`, `q99`, and `std` values in `norm_stats.json` for your dataset. Certain dimensions that are rarely used can end up with very small `q01`, `q99`, or `std` values, leading to huge states and actions after normalization. You can manually adjust the norm stats as a workaround. |
+
+---
+
+## OpenArm Integration & Real-Time Chunking (RTC)
+
+This fork adds OpenArm bimanual robot support and a full **Real-Time Chunking (RTC)** inference pipeline.
+RTC reference: Black et al., *"Real-Time Execution of Action Chunking Flow Policies"*, NeurIPS 2025.
+
+---
+
+### 1. OpenArm Robot Integration
+
+#### 신규 파일: `src/openpi/policies/openarm_policy.py`
+
+OpenArm 양팔 로봇용 데이터 변환 클래스.
+
+- **`OpenarmInputs`**: 데이터셋/추론 환경의 observation 키를 π₀ 모델 입력 포맷으로 변환
+  - `observation/image` → `base_0_rgb` (top camera)
+  - `observation/right_wrist_image` → `right_wrist_0_rgb`
+  - `observation/left_wrist_image` → `left_wrist_0_rgb` (3-camera 시)
+  - `observation/state` → `state` (16D: R_joint×7 + R_grip + L_joint×7 + L_grip)
+- **`OpenarmOutputs`**: π₀ 출력 action에서 앞 16D만 추출해서 반환 (내부 패딩 제거)
+- **`make_openarm_example()`**: 단위 테스트용 더미 observation 생성
+
+#### 추가: `src/openpi/training/config.py`
+
+- **`LeRobotOpenarmDataConfig`**: 16D state, delta action 변환, 카메라 수 설정 포함
+- **`LeRobotOpenarmForceDataConfig`**: 28D state (force 센서 포함), 3-camera 고정
+- **학습 configs**: `pi0_openarm_lora`, `pi0_openarm_force_lora`
+
+---
+
+### 2. Real-Time Chunking (RTC)
+
+#### 추가: `src/openpi/models/pi0.py`
+
+- **`_rtc_soft_mask(d, s, H)`**: 논문 Eq.5의 soft mask W 계산
+  ```
+  i < d      : W = 1.0        frozen — 추론 중 실행될 구간, 이전 chunk와 일치 강제
+  d ≤ i < H-s: W = exp 감소   intermediate — soft guidance
+  i ≥ H-s   : W = 0.0        free — 새로 생성
+  ```
+  kinetix `get_prefix_weights(schedule="exp")`와 동일한 구현.
+
+- **`sample_actions_rtc()`**: IIGDM guided denoising (논문 Algorithm 1 GuidedInference)
+  - VJP로 pseudo-inverse correction 계산
+  - guidance weight β clipping으로 안정성 확보
+  - `lax.scan`으로 num_steps 고정 시 JIT 재컴파일 없음
+
+#### 수정: `src/openpi/policies/policy.py`
+
+- obs에 `_rtc_prev_chunk` 키가 있으면 → `sample_actions_rtc()` 경로, 없으면 → 기존 `sample_actions()` 경로 (하위 호환)
+- A_prev를 전송 전 robot absolute space → model normalized delta space로 변환
+  - `DeltaActions` mask 적용 후 action norm stats로 정규화
+
+#### 수정: `src/openpi/policies/policy_config.py`
+
+- 체크포인트 로드 시 `rtc_action_norm_stats`(action 정규화 통계), `rtc_delta_mask`(delta mask)를 자동 추출해서 `Policy`에 전달
+
+#### 수정: `scripts/serve_policy.py`
+
+- **`_warmup_policy()`** 추가: 서버 시작 직후 dummy obs로 `sample_actions`와 `sample_actions_rtc` 두 함수를 모두 JIT 컴파일
+  - 미리 컴파일하지 않으면 첫 실제 추론에서 10–15s 지연 발생
+  - `sample_actions`는 `while_loop` → shape-static, 한 번만 컴파일
+  - `sample_actions_rtc`는 `lax.scan(length=num_steps)` → num_steps 고정 시 재컴파일 없음
+
+---
+
+### OpenArm 학습 Config 목록
+
+| Config | 카메라 | state | 비고 |
+|---|---|---|---|
+| `pi0_openarm_lora` | top + left wrist + right wrist | 16D | 기본 config |
+| `pi0_openarm_force_lora` | top + left wrist + right wrist | 28D | force sensor 포함 |

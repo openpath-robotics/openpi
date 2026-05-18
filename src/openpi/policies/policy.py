@@ -33,6 +33,8 @@ class Policy(BasePolicy):
         metadata: dict[str, Any] | None = None,
         pytorch_device: str = "cpu",
         is_pytorch: bool = False,
+        rtc_action_norm_stats: Any | None = None,
+        rtc_delta_mask: np.ndarray | None = None,
     ):
         """Initialize the Policy.
 
@@ -54,6 +56,8 @@ class Policy(BasePolicy):
         self._metadata = metadata or {}
         self._is_pytorch_model = is_pytorch
         self._pytorch_device = pytorch_device
+        self._rtc_action_norm_stats = rtc_action_norm_stats
+        self._rtc_delta_mask = rtc_delta_mask
 
         if self._is_pytorch_model:
             self._model = self._model.to(pytorch_device)
@@ -89,6 +93,23 @@ class Policy(BasePolicy):
 
         if rtc_params is not None:
             # ── RTC path ──────────────────────────────────────────────────────────
+            # Convert prev_chunk from robot absolute space → model normalized delta space.
+            if self._rtc_action_norm_stats is not None:
+                raw_state = np.asarray(
+                    obs.get("observation/state", obs.get("state", np.zeros(rtc_params["prev_chunk"].shape[-1]))),
+                    dtype=np.float32,
+                )
+                prev_chunk_model = rtc_params["prev_chunk"].copy()  # (H, D)
+                if self._rtc_delta_mask is not None:
+                    mask = np.asarray(self._rtc_delta_mask)
+                    dims = mask.shape[-1]
+                    prev_chunk_model[:, :dims] -= np.where(mask, raw_state[:dims], 0.0)[np.newaxis, :]
+                stats = self._rtc_action_norm_stats
+                mean = stats.mean[..., : prev_chunk_model.shape[-1]]
+                std = stats.std[..., : prev_chunk_model.shape[-1]]
+                rtc_params = dict(rtc_params)
+                rtc_params["prev_chunk"] = (prev_chunk_model - mean) / (std + 1e-6)
+
             inputs = jax.tree.map(lambda x: jnp.asarray(x)[np.newaxis, ...], inputs)
             self._rng, sample_rng = jax.random.split(self._rng)
             observation = _model.Observation.from_dict(inputs)

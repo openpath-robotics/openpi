@@ -4,6 +4,7 @@ import pathlib
 from typing import Any
 
 import jax.numpy as jnp
+import numpy as np
 
 import openpi.models.model as _model
 import openpi.policies.policy as _policy
@@ -72,6 +73,14 @@ def create_trained_policy(
         except ImportError:
             pytorch_device = "cpu"
 
+    # Extract RTC helpers: action norm stats and delta mask for prev_chunk space conversion.
+    rtc_action_norm_stats = norm_stats.get("actions") if norm_stats else None
+    rtc_delta_mask = None
+    for t in data_config.data_transforms.inputs:
+        if isinstance(t, transforms.DeltaActions) and t.mask is not None:
+            rtc_delta_mask = np.asarray(t.mask)
+            break
+
     return _policy.Policy(
         model,
         transforms=[
@@ -91,4 +100,6 @@ def create_trained_policy(
         metadata=train_config.policy_metadata,
         is_pytorch=is_pytorch,
         pytorch_device=pytorch_device if is_pytorch else None,
+        rtc_action_norm_stats=rtc_action_norm_stats,
+        rtc_delta_mask=rtc_delta_mask,
     )
