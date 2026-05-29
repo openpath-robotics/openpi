@@ -105,19 +105,15 @@ def _warmup_policy(policy: _policy.Policy) -> None:
     Without warmup each first call takes 10–15 s, causing d_naive/d_actual
     to overflow the action horizon and corrupt the RTC soft-mask parameter d.
 
-    Observation format matches openarm_lora (adjust if using a different config):
-      - observation/state:            (16,)       float32
-      - observation/image:            (480, 640, 3) uint8   — top camera
-      - observation/left_wrist_image: (480, 640, 3) uint8
-      - observation/right_wrist_image:(480, 640, 3) uint8   — optional 3-cam config
-      - prompt:                       str
+    Sends all possible camera keys so warmup works for 2/3/4-cam configs.
     """
     IMG_H, IMG_W = 480, 640
     dummy_base = {
-        "observation/state":            np.zeros(16, dtype=np.float32),
-        "observation/image":            np.zeros((IMG_H, IMG_W, 3), dtype=np.uint8),
-        "observation/left_wrist_image": np.zeros((IMG_H, IMG_W, 3), dtype=np.uint8),
-        "observation/right_wrist_image":np.zeros((IMG_H, IMG_W, 3), dtype=np.uint8),
+        "observation/state":             np.zeros(16, dtype=np.float32),
+        "observation/image":             np.zeros((IMG_H, IMG_W, 3), dtype=np.uint8),
+        "observation/left_wrist_image":  np.zeros((IMG_H, IMG_W, 3), dtype=np.uint8),
+        "observation/right_wrist_image": np.zeros((IMG_H, IMG_W, 3), dtype=np.uint8),
+        "observation/center_image":      np.zeros((IMG_H, IMG_W, 3), dtype=np.uint8),
         "prompt": "warmup",
     }
 
