@@ -98,7 +98,13 @@ def create_policy(args: Args) -> _policy.Policy:
             return create_default_policy(args.env, default_prompt=args.default_prompt)
 
 
-def _warmup_policy(policy: _policy.Policy) -> None:
+def _warmup_policy(
+    policy: _policy.Policy,
+    *,
+    action_dim: int = 16,
+    action_horizon: int = 50,
+    wrench_dim: int = 0,
+) -> None:
     """JAX JIT warmup for both sample_actions and sample_actions_rtc.
 
     sample_actions (naive) and sample_actions_rtc (RTC) are compiled separately.
@@ -106,19 +112,22 @@ def _warmup_policy(policy: _policy.Policy) -> None:
     to overflow the action horizon and corrupt the RTC soft-mask parameter d.
 
     Sends all possible camera keys so warmup works for 2/3/4-cam configs.
+    action_dim/action_horizon/wrench_dim must match the actual model config.
     """
     IMG_H, IMG_W = 480, 640
     dummy_base = {
-        "observation/state":             np.zeros(16, dtype=np.float32),
+        "observation/state":             np.zeros(action_dim, dtype=np.float32),
         "observation/image":             np.zeros((IMG_H, IMG_W, 3), dtype=np.uint8),
         "observation/left_wrist_image":  np.zeros((IMG_H, IMG_W, 3), dtype=np.uint8),
         "observation/right_wrist_image": np.zeros((IMG_H, IMG_W, 3), dtype=np.uint8),
         "observation/center_image":      np.zeros((IMG_H, IMG_W, 3), dtype=np.uint8),
         "prompt": "warmup",
     }
+    if wrench_dim > 0:
+        dummy_base["observation/wrench"] = np.zeros(wrench_dim, dtype=np.float32)
 
     # ── Naive warmup (compiles sample_actions) ──────────────────────────────
-    logging.info("[warmup] Compiling sample_actions (naive)...")
+    logging.info("[warmup] Compiling sample_actions (naive)  action_dim=%d wrench_dim=%d ...", action_dim, wrench_dim)
     t0 = time.monotonic()
     try:
         policy.infer(dummy_base)
@@ -128,12 +137,12 @@ def _warmup_policy(policy: _policy.Policy) -> None:
 
     # ── RTC warmup (compiles sample_actions_rtc) ────────────────────────────
     dummy_rtc = dict(dummy_base)
-    dummy_rtc["_rtc_prev_chunk"] = np.zeros((50, 16), dtype=np.float32)
+    dummy_rtc["_rtc_prev_chunk"] = np.zeros((action_horizon, action_dim), dtype=np.float32)
     dummy_rtc["_rtc_d"]          = np.int32(5)
     dummy_rtc["_rtc_s"]          = np.int32(10)
     dummy_rtc["_rtc_beta"]       = np.float32(5.0)
 
-    logging.info("[warmup] Compiling sample_actions_rtc (RTC)...")
+    logging.info("[warmup] Compiling sample_actions_rtc (RTC)  prev_chunk=(%d,%d) ...", action_horizon, action_dim)
     t0 = time.monotonic()
     try:
         policy.infer(dummy_rtc)
@@ -148,9 +157,20 @@ def main(args: Args) -> None:
     policy = create_policy(args)
     policy_metadata = policy.metadata
 
+    # Resolve action_dim/action_horizon/wrench_dim from train config for correct warmup shapes.
+    action_dim, action_horizon, wrench_dim = 16, 50, 0
+    if isinstance(args.policy, Checkpoint):
+        try:
+            train_cfg = _config.get_config(args.policy.config)
+            action_dim    = train_cfg.model.action_dim
+            action_horizon = train_cfg.model.action_horizon
+            wrench_dim    = getattr(train_cfg.model, "wrench_dim", 0)
+        except Exception as e:
+            logging.warning("[warmup] Could not read train config dims (using defaults): %s", e)
+
     # Warm up both JAX JIT functions before accepting client connections.
     # This prevents the first real inference from being 10-15x slower (JIT compile).
-    _warmup_policy(policy)
+    _warmup_policy(policy, action_dim=action_dim, action_horizon=action_horizon, wrench_dim=wrench_dim)
 
     # Record the policy's behavior.
     if args.record:

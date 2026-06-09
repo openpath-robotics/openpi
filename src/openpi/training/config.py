@@ -714,11 +714,87 @@ _CONFIGS = [
         ),
         data=LeRobotOpenarmDataConfig(
             repo_id="local:/home/kimminju/data/0601_multitask_lerobot",
-            action_dim=16,
+            action_dim=8,
             use_delta_actions=False,
             cameras=("image", "left_wrist_image"),
             use_wrench=True,
             assets=AssetsConfig(asset_id="0601_multitask_lerobot"),
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=30_000,
+        batch_size=16,
+        freeze_filter=_LORA_FREEZE,
+        ema_decay=None,
+    ),
+
+
+        # ── 0602 wipe: wipe_blue + wipe_red (왼팔, f_ext_L, 292 episodes) ──────────
+    TrainConfig(
+        name="0602_wipe",
+        model=pi0_config.Pi0Config(
+            action_dim=8, action_horizon=50,
+            wrench_dim=6,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotOpenarmDataConfig(
+            repo_id="local:/home/kimminju/data/0602_wipe_lerobot",
+            action_dim=8,
+            use_delta_actions=False,
+            cameras=("image", "left_wrist_image"),
+            use_wrench=True,
+            assets=AssetsConfig(asset_id="0602_wipe_lerobot"),
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=30_000,
+        batch_size=16,
+        freeze_filter=_LORA_FREEZE,
+        ema_decay=None,
+    ),
+
+        # ── 0604 wipe: wipe_blue + wipe_red (왼팔, f_ext_L, 3-cam: top+wrist+center) ─
+    TrainConfig(
+        name="0604_wipe",
+        model=pi0_config.Pi0Config(
+            action_dim=8, action_horizon=50,
+            wrench_dim=6,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotOpenarmDataConfig(
+            repo_id="local:/home/kimminju/data/0604_wipe_lerobot",
+            action_dim=8,
+            use_delta_actions=False,
+            cameras=("image", "left_wrist_image", "center_image"),
+            use_wrench=True,
+            assets=AssetsConfig(asset_id="0604_wipe_lerobot"),
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=30_000,
+        batch_size=16,
+        freeze_filter=_LORA_FREEZE,
+        ema_decay=None,
+    ),
+
+        # ── 0608 wipe: wipe_blue expert (왼팔, f_ext_L, 3-cam: top+wrist+center) ──
+    TrainConfig(
+        name="0608_wipe",
+        model=pi0_config.Pi0Config(
+            action_dim=8, action_horizon=50,
+            wrench_dim=6,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotOpenarmDataConfig(
+            repo_id="local:/home/kimminju/data/0608_wipe_lerobot",
+            action_dim=8,
+            use_delta_actions=False,
+            cameras=("image", "left_wrist_image", "center_image"),
+            use_wrench=True,
+            assets=AssetsConfig(asset_id="0608_wipe_lerobot"),
             base_config=DataConfig(prompt_from_task=True),
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
