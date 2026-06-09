@@ -188,6 +188,13 @@ def train_step(
         "grad_norm": optax.global_norm(grads),
         "param_norm": optax.global_norm(kernel_params),
     }
+
+    # Track wrench_proj param norm to confirm force conditioning weights are being updated.
+    # At init: kernel std≈0.41, bias=0. If this norm grows/changes, gradients are flowing.
+    wrench_state = nnx.state(model, nnx.All(nnx.Param, nnx_utils.PathRegex(".*wrench_proj.*")))
+    if wrench_state:
+        info["wrench_proj_param_norm"] = optax.global_norm(wrench_state)
+
     return new_state, info
 
 
@@ -225,6 +232,12 @@ def main(config: _config.TrainConfig):
     data_iter = iter(data_loader)
     batch = next(data_iter)
     logging.info(f"Initialized data loader:\n{training_utils.array_tree_to_info(batch)}")
+
+    # Verify wrench is present in the first batch.
+    if (wrench := batch[0].wrench) is not None:
+        logging.info("[wrench] ENABLED — shape=%s, abs_mean=%.4f", wrench.shape, float(jnp.mean(jnp.abs(wrench))))
+    else:
+        logging.warning("[wrench] NOT FOUND in batch — wrench conditioning will be DISABLED for this run")
 
     # Log images from first batch to sanity check.
     images_to_log = [
