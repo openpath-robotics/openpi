@@ -189,11 +189,11 @@ def train_step(
         "param_norm": optax.global_norm(kernel_params),
     }
 
-    # Track wrench_proj param norm to confirm force conditioning weights are being updated.
-    # At init: kernel std≈0.41, bias=0. If this norm grows/changes, gradients are flowing.
-    wrench_state = nnx.state(model, nnx.All(nnx.Param, nnx_utils.PathRegex(".*wrench_proj.*")))
-    if wrench_state:
-        info["wrench_proj_param_norm"] = optax.global_norm(wrench_state)
+    # Track wrench_proj gradient norm to confirm gradients flow through force conditioning.
+    flat_grads = grads.flat_state()
+    wrench_grad_leaves = [vs.value for path, vs in flat_grads.items() if any("wrench_proj" in p for p in path)]
+    if wrench_grad_leaves:
+        info["wrench_proj_grad_norm"] = optax.global_norm(wrench_grad_leaves)
 
     return new_state, info
 
