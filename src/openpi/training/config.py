@@ -864,6 +864,7 @@ _CONFIGS = [
             wrench_dim=6,
             paligemma_variant="gemma_2b_lora",
             action_expert_variant="gemma_300m_lora",
+            remat_policy="everything_saveable",
         ),
         data=LeRobotOpenarmDataConfig(
             repo_id="local:/home/kimminju/data/0615_force_test_lerobot",
@@ -889,6 +890,7 @@ _CONFIGS = [
             wrench_dim=0,
             paligemma_variant="gemma_2b_lora",
             action_expert_variant="gemma_300m_lora",
+            remat_policy="everything_saveable",
         ),
         data=LeRobotOpenarmDataConfig(
             repo_id="local:/home/kimminju/data/0615_force_test_lerobot",
