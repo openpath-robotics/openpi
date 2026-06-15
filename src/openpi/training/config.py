@@ -855,6 +855,56 @@ _CONFIGS = [
         freeze_filter=_LORA_FREEZE,
         ema_decay=None,
     ),
+
+    # ── 0615 force test: 왼팔, f_ext_L, 1-cam (left wrist only) ──────────────
+    TrainConfig(
+        name="0615_force_test",
+        model=pi0_config.Pi0Config(
+            action_dim=8, action_horizon=50,
+            wrench_dim=6,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotOpenarmDataConfig(
+            repo_id="local:/home/kimminju/data/0615_force_test_lerobot",
+            action_dim=8,
+            use_delta_actions=False,
+            cameras=("left_wrist_image",),
+            use_wrench=True,
+            assets=AssetsConfig(asset_id="0615_force_test_lerobot"),
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=30_000,
+        batch_size=16,
+        freeze_filter=_LORA_FREEZE,
+        ema_decay=None,
+    ),
+
+    # ── 0615 force test (no wrench): 같은 데이터셋, wrench 토큰 없이 ───────────
+    TrainConfig(
+        name="0615_force_test_nowrench",
+        model=pi0_config.Pi0Config(
+            action_dim=8, action_horizon=50,
+            wrench_dim=0,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotOpenarmDataConfig(
+            repo_id="local:/home/kimminju/data/0615_force_test_lerobot",
+            action_dim=8,
+            use_delta_actions=False,
+            cameras=("left_wrist_image",),
+            use_wrench=False,
+            assets=AssetsConfig(asset_id="0615_force_test_lerobot"),
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=30_000,
+        batch_size=16,
+        freeze_filter=_LORA_FREEZE,
+        ema_decay=None,
+    ),
 ]
 
 if len({config.name for config in _CONFIGS}) != len(_CONFIGS):
