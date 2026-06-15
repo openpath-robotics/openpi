@@ -62,6 +62,7 @@ class OpenarmInputs(transforms.DataTransformFn):
 
     action_dim: int = 16
     cameras: tuple[str, ...] = DEFAULT_CAMERAS
+    use_wrench: bool = False
 
     def __call__(self, data: dict) -> dict:
         images = {}
@@ -77,7 +78,7 @@ class OpenarmInputs(transforms.DataTransformFn):
             "image_mask": image_mask,
         }
 
-        if "observation/wrench" in data:
+        if self.use_wrench and "observation/wrench" in data:
             inputs["wrench"] = data["observation/wrench"]
 
         if "actions" in data:
