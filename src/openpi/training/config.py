@@ -596,6 +596,7 @@ class LeRobotOpenarmDataConfig(DataConfigFactory):
             inputs=[openarm_policy.OpenarmInputs(
                 action_dim=self.action_dim,
                 cameras=self.cameras,
+                use_wrench=self.use_wrench,
             )],
             outputs=[openarm_policy.OpenarmOutputs(action_dim=self.action_dim)],
         )
@@ -784,7 +785,7 @@ _CONFIGS = [
         name="0608_wipe",
         model=pi0_config.Pi0Config(
             action_dim=8, action_horizon=50,
-            wrench_dim=6,
+            wrench_dim=0,  # 버그로 wrench 없이 학습됨 → suffix 51토큰 유지
             paligemma_variant="gemma_2b_lora",
             action_expert_variant="gemma_300m_lora",
         ),
@@ -793,8 +794,33 @@ _CONFIGS = [
             action_dim=8,
             use_delta_actions=False,
             cameras=("image", "left_wrist_image", "center_image"),
-            use_wrench=True,
+            use_wrench=False,  # wrench_dim=0이므로 데이터도 안 씀
             assets=AssetsConfig(asset_id="0608_wipe_lerobot"),
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=30_000,
+        batch_size=16,
+        freeze_filter=_LORA_FREEZE,
+        ema_decay=None,
+    ),
+
+            # ── 0605 wipe: wipe_blue + wipe_red (왼팔, f_ext_L, 3-cam: top+wrist+center) ─
+    TrainConfig(
+        name="0605_wipe",
+        model=pi0_config.Pi0Config(
+            action_dim=8, action_horizon=50,
+            wrench_dim=0,  # 버그로 wrench 없이 학습됨 → suffix 51토큰 유지
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotOpenarmDataConfig(
+            repo_id="local:/home/kimminju/data/0605_wipe_lerobot",
+            action_dim=8,
+            use_delta_actions=False,
+            cameras=("image", "left_wrist_image", "center_image"),
+            use_wrench=False,  # wrench_dim=0이므로 데이터도 안 씀
+            assets=AssetsConfig(asset_id="0605_wipe_lerobot"),
             base_config=DataConfig(prompt_from_task=True),
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
@@ -812,6 +838,7 @@ _CONFIGS = [
             wrench_dim=6,
             paligemma_variant="gemma_2b_lora",
             action_expert_variant="gemma_300m_lora",
+            remat_policy="nothing_saveable",
         ),
         data=LeRobotOpenarmDataConfig(
             repo_id="local:/home/kimminju/data/0608_wipe_lerobot",
